@@ -1,6 +1,6 @@
-import {smooth,lerp,distance,organShape,coiledPath,development} from './growth.js?v=wrap-smooth-1';
-import {SUPPORTS,shellGap,firstTouch} from './supports.js';
-export const CONFIG=Object.freeze({poleX:.72,poleRadius:.10,poleHeight:10.5,growthSpeed:.061,turnRate:.25,orbitPeriod:10.8,wrapDuration:8.4,minY:.22,maxY:10.0,maxX:5.2,maxAngle:65*Math.PI/180});
+import {smooth,lerp,distance,organShape,coiledPath,development,shootFrame,normalized} from './growth.js?v=spatial-orbit-1';
+import {SUPPORTS,shellGap,firstTouch} from './supports.js?v=spatial-orbit-1';
+export const CONFIG=Object.freeze({poleX:.72,poleRadius:.10,poleHeight:10.5,growthSpeed:.061,turnRate:.25,orbitPeriod:18,orbitWidth:.16,orbitDepth:.58,flexLength:1.75,wrapDuration:8.4,minY:.22,maxY:10.0,maxX:5.2,maxAngle:65*Math.PI/180});
 export const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
 // Use the whole torso axis. Arm, hand and head poses do not control direction.
 export function bodyPoseFromLandmarks(landmarks,aspect=1){
@@ -16,35 +16,6 @@ export function bodyPoseFromLandmarks(landmarks,aspect=1){
  return {shoulders,hips,tilt,direction:Math.sign(tilt)*amount*CONFIG.maxAngle};
 }
 export function directionFromLandmarks(landmarks,aspect=1){return bodyPoseFromLandmarks(landmarks,aspect)?.direction??null;}
-// Pitch relative to the hips is translation invariant in world-landmark space.
-export function torsoPitch(points){
- const joints=[11,12,23,24].map(i=>points?.[i]);
- if(joints.some(p=>!p||!Number.isFinite(p.z)||!Number.isFinite(p.y)||(p.visibility??1)<.55))return null;
- const [a,b,c,d]=joints, height=(c.y+d.y-a.y-b.y)/2;
- return height>.12?Math.atan2((c.z+d.z-a.z-b.z)/2,height):null;
-}
-export function shoulderSpanSignal(points){
- const a=points?.[11],b=points?.[12];
- if(!a||!b)return null;
- const width=Math.abs(a.x-b.x);
- return width>.05?2*Math.log(width):null;
-}
-export class DepthInput{
- constructor(){this.reset();}
- reset(){this.samples=[];this.neutral=null;this.filtered=0;}
- update(pitch,dt){
-  if(pitch===null){this.filtered=0;return 0;}
-  if(this.neutral===null){
-   this.samples.push(pitch);
-   if(this.samples.length>=10)this.neutral=[...this.samples].sort((a,b)=>a-b)[5];
-   return 0;
-  }
-  const delta=pitch-this.neutral;
-  this.filtered+=(delta-this.filtered)*(1-Math.exp(-Math.min(dt,.25)/.22));
-  const degrees=this.filtered*180/Math.PI;
-  return Math.sign(degrees)*clamp((Math.abs(degrees)-4)/15,0,1)*Math.PI/3;
- }
-}
 const variation=(id,salt=0)=>{const v=Math.sin(id*127.1+salt*311.7)*43758.5453;return v-Math.floor(v);};
 function organTraits(id){
  return {tendrilCount:id<2?0:[1,2,1,2,2,1,3][id%7],leafPairs:id===0?1:2,
@@ -56,18 +27,25 @@ export class PeaSimulation{
  reset(){
   this.nodes=[{x:-1.04,y:-1.1,z:0,s:-3.45},{x:-1.08,y:.20,z:.01,s:-2.15},{x:-.97,y:.80,z:0,s:-1.55},{x:-1.03,y:1.35,z:.015,s:-1},{x:-.82,y:1.95,z:0,s:-.4},{x:-.88,y:2.35,z:0,s:0}];
   this.head={...this.nodes.at(-1)};this.angle=0;this.targetAngle=0;this.depthAngle=0;this.targetDepth=0;this.time=0;this.phase='exploring';this.travel=0;this.revision=0;this.blocked=false;
-  this.connections=[];this.anchor=null;this.wrapProgress=0;this.waveOrigin=0;this.bendOriginAngle=0;this.lockedS=-Infinity;this.nextNode=.52;
+  this.connections=[];this.anchor=null;this.wrapProgress=0;this.waveOrigin=0;this.bendOriginAngle=0;this.bendOriginDepth=0;this.lockedS=-Infinity;this.nextNode=.52;
   this.organs=[{id:0,at:-1.66,born:-55,side:-1},{id:1,at:-1.03,born:-38,side:1},{id:2,at:-.36,born:-20,side:-1},{id:3,at:0,born:-1,side:1}].map(o=>({...o,...organTraits(o.id)}));
   this.updateTip();
  }
  setDirection(radians,depth=0){
+  // The prototype supplies lateral input only. The second axis is reserved
+  // for a later calibrated IMU input, independent of autonomous exploration.
   this.targetAngle=clamp(radians,-CONFIG.maxAngle,CONFIG.maxAngle);
   this.targetDepth=clamp(depth,-Math.PI/3,Math.PI/3);
  }
  deformation(s){
-  const start=Math.max(this.travel-1.05,this.lockedS),w=smooth((s-start)/Math.max(.05,this.travel-start));
-  const p=this.time*Math.PI*2/CONFIG.orbitPeriod,q=this.waveOrigin*Math.PI*2/CONFIG.orbitPeriod;
-  return{x:((Math.sin(p)-Math.sin(q))*.10+.24*(Math.sin(this.angle)-Math.sin(this.bendOriginAngle)))*w*w,y:0,z:(Math.cos(p)-Math.cos(q))*.055*w*w};
+  const start=Math.max(this.travel-CONFIG.flexLength,this.lockedS),w=smooth((s-start)/Math.max(.05,this.travel-start));
+  const orbit=(time,angle,depth)=>{
+   const phase=time*Math.PI*2/CONFIG.orbitPeriod,amplitude=smooth(time/6),frame=shootFrame(angle,depth);
+   const side=CONFIG.orbitWidth*Math.cos(phase)*amplitude,z=CONFIG.orbitDepth*Math.sin(phase)*amplitude;
+   return {x:frame.side.x*side+frame.depth.x*z,y:frame.side.y*side+frame.depth.y*z,z:frame.side.z*side+frame.depth.z*z};
+  };
+  const a=orbit(this.time,this.angle,this.depthAngle),b=orbit(this.waveOrigin,this.bendOriginAngle,this.bendOriginDepth);
+  return{x:(a.x-b.x+.24*(Math.sin(this.angle)-Math.sin(this.bendOriginAngle)))*w*w,y:(a.y-b.y)*w*w,z:(a.z-b.z)*w*w};
  }
  stemPoint(s){
   const all=[...this.nodes];if(distance(all.at(-1),this.head)>1e-7)all.push(this.head);
@@ -81,17 +59,8 @@ export class PeaSimulation{
   if(organ.attachedShape)return {...organ.attachedShape,age:this.time-organ.born,development:development(this.time-organ.born)};
   const a=this.stemPoint(organ.at-.035),b=this.stemPoint(Math.min(this.head.s,organ.at+.035));
   const dy=b.y-a.y,dz=b.z-a.z;
-  const heading=Math.atan2(b.x-a.x,Math.hypot(dy,dz));
-  const base=this.stemPoint(organ.at),shape=organShape(organ,base,this.time,heading);
-  // The leaf starts in the local plane of the shoot, including its depth tilt.
-  const pitch=Math.atan2(dz,dy),cos=Math.cos(pitch),sin=Math.sin(pitch);
-  const tilt=p=>{
-   const y=p.y-base.y,z=p.z-base.z;
-   return {x:p.x,y:base.y+y*cos-z*sin,z:base.z+y*sin+z*cos};
-  };
-  shape.rachis=shape.rachis.map(tilt);
-  shape.paths=shape.paths.map(path=>path.map(tilt));
-  return shape;
+  const dx=b.x-a.x,heading=Math.atan2(dx,dy),pitch=Math.atan2(dz,Math.hypot(dx,dy));
+  return organShape(organ,this.stemPoint(organ.at),this.time,heading,pitch);
  }
  tendrilPaths(organ,shape=this.shape(organ)){
   const c=organ.contact;
@@ -135,38 +104,64 @@ export class PeaSimulation{
   for(const p of this.nodes){const d=this.deformation(p.s);p.x+=d.x;p.y+=d.y;p.z+=d.z;}
   const d=this.deformation(this.head.s);this.head.x+=d.x;this.head.y+=d.y;this.head.z+=d.z;
   if(this.nodes.every(p=>Math.abs(p.s-at)>1e-8)){const i=this.nodes.findIndex(p=>p.s>at);if(i<0)this.nodes.push(fixedRoot);else this.nodes.splice(i,0,fixedRoot);}
-  this.lockedS=Math.max(this.lockedS,at);this.waveOrigin=this.time;this.bendOriginAngle=this.angle;
+  this.lockedS=Math.max(this.lockedS,at);this.waveOrigin=this.time;this.bendOriginAngle=this.angle;this.bendOriginDepth=this.depthAngle;
  }
  detectContact(){
   for(const organ of this.organs){
    if(organ.contact||this.time-organ.born<7)continue;
-   const shape=this.shape(organ);
-   for(let b=0;b<shape.paths.length;b++){
-    const path=shape.paths[b];
-    for(let i=Math.floor(path.length*.45);i<path.length;i++){
-     let hit,support;
-     for(const shell of this.supports){
-      hit=firstTouch(shell,path[i-1],path[i]);
-      if(hit){support=shell;break;}
+   const current=this.shape(organ),previous=organ.searchShape;
+   let candidate;
+   if(previous){
+    for(let b=0;b<current.paths.length;b++)for(let i=Math.floor(current.paths[b].length*.45);i<current.paths[b].length;i++){
+     const a=previous.paths[b][i],p=current.paths[b][i];
+     for(const support of this.supports){
+      const hit=firstTouch(support,a,p);if(!hit)continue;
+      const fraction=clamp(distance(a,hit)/(distance(a,p)||1),0,1);
+      if(!candidate||fraction<candidate.fraction)candidate={hit,support,b,i,fraction,swept:true};
      }
-     if(!hit)continue;
-     const theta=Math.atan2(hit.z-support.z,hit.x-support.x);
-     const previous=path[i-1],next=path[i];
-     const tangential=(-(next.x-previous.x)*Math.sin(theta)+(next.z-previous.z)*Math.cos(theta))/(distance(previous,next)||1);
-     // Preserve even a small tangential component instead of reversing it
-     // during capture. A radial touch can wind either way.
-     const sign=Math.abs(tangential)>.05?Math.sign(tangential):-organ.side;
-     const original=path.map(q=>({...q}));
-     original.splice(i,0,hit);
-     const c={...hit,supportId:support.id,theta,sign,branch:b,index:i,original,
-       progress:0,born:this.time,organId:organ.id,extension:.046*CONFIG.wrapDuration};
-     organ.attachedShape=structuredClone(shape);organ.contact=c;this.anchor=c;this.phase='wrapping';this.wrapProgress=0;this.pinStem(organ.at);return;
     }
    }
+   // A new organ, or a segment crossing between material samples, can also
+   // make a surface contact at its current pose.
+   if(!candidate)for(let b=0;b<current.paths.length&&!candidate;b++){
+    const path=current.paths[b];
+    for(let i=Math.floor(path.length*.45);i<path.length&&!candidate;i++)for(const support of this.supports){
+     const hit=firstTouch(support,path[i-1],path[i]);
+     if(hit){candidate={hit,support,b,i,swept:false};break;}
+    }
+   }
+   if(!candidate){organ.searchShape=current;continue;}
+   const {hit,support,b,i,swept}=candidate;
+   let shape=current;
+   if(swept){
+    const t=candidate.fraction,past=lerp(previous.base,current.base,t);
+    const shift={x:current.base.x-past.x,y:current.base.y-past.y,z:current.base.z-past.z};
+    shape={...current,rachis:current.rachis.map((p,j)=>{
+      const q=lerp(previous.rachis[j],p,t),w=1-smooth(j/(current.rachis.length-1));
+      return {x:q.x+shift.x*w,y:q.y+shift.y*w,z:q.z+shift.z*w};
+     }),paths:current.paths.map((path,k)=>path.map((p,j)=>lerp(previous.paths[k][j],p,t)))};
+    shape.paths[b][i]=hit;
+   }
+   const path=shape.paths[b],theta=Math.atan2(hit.z-support.z,hit.x-support.x);
+   const a=path[i-1],next=path[Math.min(path.length-1,i+1)];
+   const tangential=(-(next.x-a.x)*Math.sin(theta)+(next.z-a.z)*Math.cos(theta))/(distance(a,next)||1);
+   const sign=Math.abs(tangential)>.05?Math.sign(tangential):-organ.side;
+   const original=path.map(q=>({...q}));
+   if(!swept)original.splice(i,0,hit);
+   const c={...hit,supportId:support.id,theta,sign,branch:b,index:i,original,
+     progress:0,born:this.time,organId:organ.id,extension:.046*CONFIG.wrapDuration};
+   organ.attachedShape=structuredClone(shape);delete organ.searchShape;
+   organ.contact=c;this.anchor=c;this.phase='wrapping';this.wrapProgress=0;this.pinStem(organ.at);return;
   }
  }
  step(dt,speed=1){
-  dt=clamp(dt,0,.06)*clamp(speed,.5,2);if(!dt)return;this.time+=dt;
+  const duration=clamp(dt,0,.06)*clamp(speed,.5,2);if(!duration)return;
+  // Fast spatial sweeps must not skip through a narrow shell between frames.
+  const count=Math.ceil(duration*120);
+  for(let i=0;i<count;i++)this.advance(duration/count);
+ }
+ advance(dt){
+  this.time+=dt;
   const maxTurn=CONFIG.turnRate*dt;
   this.angle+=clamp(this.targetAngle-this.angle,-maxTurn,maxTurn);
   let wrapLoad=0;
@@ -177,8 +172,13 @@ export class PeaSimulation{
   }
   const rate=CONFIG.growthSpeed*(1-.28*wrapLoad);
   this.depthAngle+=clamp(this.targetDepth-this.depthAngle,-maxTurn,maxTurn);
-  let dx=Math.sin(this.angle)*Math.cos(this.depthAngle),dz=Math.sin(this.depthAngle);
-  let dy=Math.cos(this.angle)*Math.cos(this.depthAngle);
+  // Circumnutation belongs to the plant. It depends only on simulation time
+  // and its growth axis; supports never select or attract the exploration.
+  const frame=shootFrame(this.angle,this.depthAngle),phase=this.time*Math.PI*2/CONFIG.orbitPeriod;
+  const lateral=.15*Math.cos(phase)*smooth(this.time/6),depth=.36*Math.sin(phase)*smooth(this.time/6);
+  const direction=normalized({x:frame.axis.x+frame.side.x*lateral+frame.depth.x*depth,
+   y:frame.axis.y+frame.side.y*lateral+frame.depth.y*depth,z:frame.axis.z+frame.side.z*lateral+frame.depth.z*depth});
+  let {x:dx,y:dy,z:dz}=direction;
   // Ease head-on growth upward before the shoot reaches the shell.
   // Tangential and outward motion remain available.
   for(const shell of this.supports){

@@ -1,10 +1,10 @@
 import * as THREE from 'three';
-import {development,samplePath} from './growth.js?v=wrap-smooth-1';
+import {development,samplePath} from './growth.js?v=spatial-orbit-1';
 import {GrowingTube,unfoldBlade} from './growing-mesh.js?v=habitat-1';
 import {CapsuleField,leafRandom} from './foliage.js?v=habitat-1';
 import {inkMap,leafGeometry,leafMaterial} from './botanical.js?v=habitat-1';
 
-import {clearShells} from './supports.js';
+import {clearShells} from './supports.js?v=spatial-orbit-1';
 import {soilMesh,shellMesh} from './habitat.js';
 const V=(p)=>new THREE.Vector3(p.x,p.y,p.z??0);
 function disposeChildren(group){for(const child of [...group.children]){group.remove(child);child.traverse(o=>{if(o.isMesh)o.geometry?.dispose();});}}

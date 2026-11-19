@@ -14,6 +14,10 @@ test('every visible shell can receive a surface contact from either side',()=>{
     assert.equal(firstTouch(shell,at(r+.08),at(r+.03)),null);
   }
 });
+test('an already submerged segment does not manufacture a projected surface contact',()=>{
+  const shell=SUPPORTS[3];
+  assert.equal(firstTouch(shell,{x:shell.x,y:3,z:shell.z},{x:shell.x+.01,y:3.01,z:shell.z}),null);
+});
 for(const [name,input,id] of [['right',.95,'S04'],['left',-.98,'S01']]){
   test(name+' route attaches to its own mesh and respects the available distal length',()=>{
     const sim=new PeaSimulation();sim.setDirection(input);

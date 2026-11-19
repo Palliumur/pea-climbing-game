@@ -27,7 +27,12 @@ test('leaf surfaces bend to one continuous side of the pole with clearance',()=>
  const p={x:CONFIG.poleX,y:CONFIG.poleHeight+1,z:0};clearPole(p,CONFIG);assert.equal(p.z,0);
 });
 test('exploring left first still allows later attachment above the former height limit',()=>{
- const s=new PeaSimulation();for(let i=0;i<60*140&&!s.connections.length;i++){s.setDirection(s.time<20?-.85:.95);s.step(1/60);}
+ const s=new PeaSimulation();
+ // Start above the historical cap so earlier autonomous contacts cannot make
+ // this a test of one particular exploration phase rather than support height.
+ for(const node of s.nodes)node.y+=2;
+ s.head.y+=2;
+ for(let i=0;i<60*140&&!s.connections.length;i++){s.setDirection(s.time<20?-.85:.95);s.step(1/60);}
  assert.ok(s.connections.length,'the return path can reach a real support contact');
  assert.ok(s.connections[0].y>4.7,'the route uses the taller support');assert.ok(!s.blocked);
 });

@@ -87,7 +87,11 @@ export function firstTouch(shell,a,b,pad=.005) {
      Math.min(a.z,b.z)>shell.z+extent||Math.max(a.z,b.z)<shell.z-extent)return null;
   const at=t=>({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t,z:a.z+(b.z-a.z)*t});
   let lo=0,hi=1;
-  if(shellGap(shell,a)<=pad)hi=0;
+  // An already submerged proximal segment is not a new surface crossing.
+  // Projecting it onto the shell manufactured an off-curve contact and kink.
+  const gapA=shellGap(shell,a);
+  if(gapA<pad-1e-7)return null;
+  if(gapA<=pad)hi=0;
   else if(shellGap(shell,at(.5))<=pad)hi=.5;
   else if(shellGap(shell,b)>pad)return null;
   for(let i=0;i<10&&hi>0;i++){

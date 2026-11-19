@@ -1,23 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {PeaSimulation,CONFIG} from '../dist/simulation.js';
+import {readFileSync} from 'node:fs';
+import {CONFIG} from '../dist/simulation.js';
 import {SUPPORTS,shellGap} from '../dist/supports.js';
 import {coiledPath,distance} from '../dist/growth.js';
 import {CatmullRomCurve3,Vector3} from '../dist/vendor/three/three.module.js';
 
-function contactOn(shell){
-  const sim=new PeaSimulation();
-  for(let frame=0;frame<5000;frame++){
-    const side=shell.x<-.88?-1:1;
-    const targetZ=shell.id==='S05'&&sim.head.x<1.14?.76:shell.z-.10;
-    sim.setDirection((shell.x-sim.head.x-side*.46)*1.8,
-      Math.max(-.85,Math.min(.85,(targetZ-sim.head.z)*1.6)));
-    sim.step(1/30);
-    const organ=sim.organs.find(o=>o.contact?.supportId===shell.id);
-    if(organ)return organ.contact;
-  }
-  assert.fail('No contact on '+shell.id);
-}
+// Captured from the original visible-fold reproductions. Keeping these
+// independent of growth routes preserves the regression as exploration evolves.
+const contacts=JSON.parse(readFileSync(new URL('./fixtures/wrapping-contacts.json',import.meta.url)));
 function angle(a,b,c){
   const dot=(b.x-a.x)*(c.x-b.x)+(b.y-a.y)*(c.y-b.y)+(b.z-a.z)*(c.z-b.z);
   return Math.acos(Math.max(-1,Math.min(1,dot/(distance(a,b)*distance(b,c)))));
@@ -25,7 +16,7 @@ function angle(a,b,c){
 const length=path=>path.slice(1).reduce((sum,p,i)=>sum+distance(path[i],p),0);
 
 for(const shell of SUPPORTS)test(shell.id+' wraps without folds throughout the animation',()=>{
-  const c=contactOn(shell),frames=Math.round(CONFIG.wrapDuration*60);
+  const c=contacts.find(c=>c.supportId===shell.id),frames=Math.round(CONFIG.wrapDuration*60);
   assert.deepEqual(coiledPath(c,0,shell),c.original);
   let previousTip=c.original.at(-1);
   for(let frame=1;frame<=frames;frame++){

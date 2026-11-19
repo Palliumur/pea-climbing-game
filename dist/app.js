@@ -1,5 +1,5 @@
-import {PeaSimulation, bodyPoseFromLandmarks, torsoPitch, shoulderSpanSignal, DepthInput} from './simulation.js?v=wrap-smooth-1';
-import {PeaScene} from './scene.js?v=wrap-smooth-1';
+import {PeaSimulation, bodyPoseFromLandmarks} from './simulation.js?v=spatial-orbit-1';
+import {PeaScene} from './scene.js?v=spatial-orbit-1';
 
 const video = document.getElementById('video');
 const overlay = document.getElementById('poseOverlay');
@@ -22,7 +22,6 @@ let session = null;
 let started = false;
 let manual = false;
 let manualDegrees = 0;
-let manualDepth = 0;
 let paused = false;
 let previousFrame = 0;
 let errorTimer;
@@ -135,7 +134,7 @@ async function openCamera() {
     closeCamera('Camera access requires localhost or HTTPS.');
     return;
   }
-  const current = {depth: new DepthInput(), span: new DepthInput(), useWorld: false, worldFrames: 0, lastPitchAt: 0, stream: null, detector: null, tracking: false, lastSeen: 0, lastInference: 0, lastVideoTime: -1};
+  const current = {stream: null, detector: null, tracking: false, lastSeen: 0, lastInference: 0, lastVideoTime: -1};
   session = current;
   manual = false;
   button.disabled = true;
@@ -191,30 +190,14 @@ function infer(now) {
   current.lastVideoTime = video.currentTime;
   current.lastInference = now;
   try {
-    const {landmarks, worldLandmarks} = current.detector.detectForVideo(video, now);
+    const {landmarks} = current.detector.detectForVideo(video, now);
     const body = bodyPoseFromLandmarks(landmarks?.[0], video.videoWidth / video.videoHeight);
     drawPose(landmarks?.[0], body);
     if (body) {
-      const pitch = torsoPitch(worldLandmarks?.[0]);
-      const dt = (now-current.lastSeen)/1000;
-      if (pitch !== null) {
-        current.lastPitchAt = now;
-        current.worldFrames++;
-        current.lean = current.depth.update(pitch, dt);
-        if (current.worldFrames >= 4) current.useWorld = true;
-      } else {
-        current.worldFrames = 0;
-        if (now-current.lastPitchAt > 350) current.useWorld = false;
-      }
-      const step = current.span.update(shoulderSpanSignal(landmarks[0]), dt);
-      const input = current.useWorld ? current.depth : current.span;
-      const depth = current.useWorld ? current.lean : step;
-      sim.setDirection(body.direction, depth);
+      sim.setDirection(body.direction);
       current.lastSeen = now;
       current.tracking = true;
-      showHint(input.neutral === null ? 'Face forward and stand upright for a moment.' :
-        !current.useWorld ? 'Lean to steer. Step closer or farther for depth.' :
-        'Lean left, right, forward or back to guide growth.');
+      showHint('Lean left or right. The pea explores in 3D.');
     }
   } catch {
     closeCamera('Tracking interrupted. Enable the camera to retry.');
@@ -225,18 +208,17 @@ button.addEventListener('click', () => session ? closeCamera() : openCamera());
 window.addEventListener('pagehide', () => closeCamera());
 window.addEventListener('keydown', event => {
   if (!world || event.altKey || event.ctrlKey || event.metaKey) return;
-  if (!session && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
+  if (!session && ['ArrowLeft', 'ArrowRight'].includes(event.key)) {
     event.preventDefault();
     beginGrowth();
     manual = true;
-    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
-      manualDepth = Math.max(-60, Math.min(60, manualDepth + (event.key === 'ArrowUp' ? -5 : 5)));
-    } else manualDegrees = Math.max(-65, Math.min(65, manualDegrees + (event.key === 'ArrowLeft' ? -5 : 5)));
-    sim.setDirection(manualDegrees * Math.PI / 180, manualDepth * Math.PI / 180);
+    manualDegrees = Math.max(-65, Math.min(65, manualDegrees + (event.key === 'ArrowLeft' ? -5 : 5)));
+    sim.setDirection(manualDegrees * Math.PI / 180);
+    showHint('Left / right to guide. The pea explores in 3D.');
   } else if (started && event.key.toLowerCase() === 'r') {
     sim.reset();
     world.reset();
-    manualDegrees = manualDepth = 0;
+    manualDegrees = 0;
   } else if (started && event.code === 'Space' && event.target !== button) {
     event.preventDefault();
     paused = !paused;

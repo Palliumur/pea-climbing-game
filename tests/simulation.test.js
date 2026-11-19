@@ -37,8 +37,8 @@ test('a real spatial contact triggers wrapping, and attachment remains after ste
   }
   assert.ok(reached,'reachable pole should establish a connection');
   const connection=structuredClone(s.connections[0]);s.setDirection(-1);
-  for(let i=0;i<180;i++)s.step(1/60);
-  assert.deepEqual(s.connections[0],connection);assert.ok(s.head.x<CONFIG.poleX);
+  for(let i=0;i<720;i++)s.step(1/60);
+  assert.deepEqual(s.connections[0],connection);assert.ok(s.angle<0);
 });
 function body(lean=0,translate=0,aspect=1){
  const p=Array.from({length:33},()=>({x:.5,y:.5,z:0,visibility:1}));
