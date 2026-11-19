@@ -90,35 +90,70 @@ export function coiledPath(contact,progress,poleX,poleRadius){
 const wrapPlans=new WeakMap();
 const offset=(a,b)=>({x:a.x-b.x,y:a.y-b.y,z:a.z-b.z});
 const advance=(p,v,s)=>({x:p.x+v.x*s,y:p.y+v.y*s,z:p.z+v.z*s});
+function roundedShell(shell,low,high){
+  // A periodic cubic B-spline bridges individual mesh edges. The measured
+  // outward padding keeps the elastic route outside the actual mesh.
+  const columns=64,rows=5,tau=Math.PI*2,profiles=[];
+  const spline=(values,a)=>{
+    const v=((a/tau%1)+1)%1*columns,i=Math.floor(v),t=v-i,q=1-t;
+    const at=k=>values[(k+columns)%columns];
+    return (q*q*q*at(i-1)+(3*t*t*t-6*t*t+4)*at(i)+
+      (-3*t*t*t+3*t*t+3*t+1)*at(i+1)+t*t*t*at(i+2))/6;
+  };
+  for(let row=0;row<rows;row++){
+    const y=mix(low,high,row/(rows-1));
+    const radii=Array.from({length:columns},(_,i)=>shellRadius(shell,y,i*tau/columns));
+    let padding=.008;
+    for(let i=0;i<columns*4;i++){
+      const a=i*tau/(columns*4);
+      padding=Math.max(padding,shellRadius(shell,y,a)-spline(radii,a)+.008);
+    }
+    profiles.push(radii.map(r=>r+padding));
+  }
+  return (a,y)=>{
+    const v=clamp01((y-low)/(high-low))*(rows-1),i=Math.min(rows-2,Math.floor(v));
+    return mix(spline(profiles[i],a),spline(profiles[i+1],a),smooth(v-i));
+  };
+}
 function makeWrapPlan(contact,shell){
   const points=contact.original,j=contact.index,start=points[j],tail=points.slice(j);
   const arc=[0];
   for(let i=1;i<tail.length;i++)arc.push(arc[i-1]+distance(tail[i-1],tail[i]));
   const distal=arc.at(-1),budget=distal+contact.extension;
-  const target=[start], angles=[contact.theta], count=72;
+  const count=96;
   const rise=.10,step=budget/count;
-  for(let i=1;i<=count;i++){
-    const prev=target.at(-1),theta=angles.at(-1),y=start.y+i*step*rise;
-    const clearance=mix(.005,.006,smooth(i/5));
-    function surface(delta){
-      const a=theta+contact.sign*delta,r=shellRadius(shell,y,a)+clearance;
-      return {x:shell.x+r*Math.cos(a),y,z:shell.z+r*Math.sin(a)};
+  const profile=roundedShell(shell,start.y-.04,start.y+budget*rise+.04);
+  const radius=Math.hypot(start.x-shell.x,start.z-shell.z),blendLength=Math.min(.14,budget*.65);
+  const shift=radius-profile(contact.theta,start.y),epsilon=.0001;
+  const probe=contact.theta+contact.sign*epsilon/radius,probeY=start.y+epsilon*rise;
+  const derivative=(shellRadius(shell,probeY,probe)-shellRadius(shell,start.y,contact.theta)-
+    profile(probe,probeY)+profile(contact.theta,start.y))/epsilon;
+  let target,angles,bump=0;
+  for(let pass=0;pass<6;pass++){
+    target=[start];angles=[contact.theta];let extra=0;
+    for(let i=1;i<=count;i++){
+      const travel=i*step,u=clamp01(travel/blendLength),y=start.y+travel*rise;
+      function surface(delta){
+        const a=angles.at(-1)+contact.sign*delta;
+        const r=profile(a,y)+shift*(1-smooth(u))+derivative*blendLength*u*(1-u)**2+bump*u*u*(1-u)**2;
+        return {x:shell.x+r*Math.cos(a),y,z:shell.z+r*Math.sin(a)};
+      }
+      let delta=step/Math.max(.01,profile(angles.at(-1),y));
+      for(let k=0;k<6;k++)delta*=step/Math.max(1e-8,distance(target.at(-1),surface(delta)));
+      const q=surface(delta),a=angles.at(-1)+contact.sign*delta;
+      target.push(q);angles.push(a);
+      const gap=Math.hypot(q.x-shell.x,q.z-shell.z)-shellRadius(shell,y,a);
+      if(u<1&&gap<.005)extra=Math.max(extra,(.005-gap)/Math.max(1e-8,u*u*(1-u)**2));
     }
-    let delta=step/Math.max(.01,shellRadius(shell,y,theta));
-    for(let k=0;k<4;k++)delta*=step/Math.max(1e-8,distance(prev,surface(delta)));
-    target.push(surface(delta));angles.push(theta+contact.sign*delta);
+    if(extra<1e-5)break;
+    bump+=extra*1.1;
   }
-  const tangent=normalized(offset(target[1],start));
   let collar=j;
-  while(collar>1&&distance(points[collar],start)<.16)collar--;
+  let collarLength=0;
+  while(collar>1&&collarLength<.24){collarLength+=distance(points[collar],points[collar-1]);collar--;}
   const collarArc=[0];
   for(let k=collar+1;k<=j;k++)collarArc.push(collarArc.at(-1)+distance(points[k-1],points[k]));
-  const collarLength=collarArc.at(-1);
-  const entry=normalized(offset(points[collar+1],points[collar]));
-  const b=advance(points[collar],entry,collarLength*.35),c=advance(start,tangent,-collarLength*.52);
-  const rounded=points.slice(0,j+1);
-  for(let k=collar+1;k<j;k++)rounded[k]=bezier(points[collar],b,c,start,collarArc[k-collar]/(collarLength||1));
-  const source=[],polar=[],gaps=[];
+  const source=[],polar=[],radii=[];
   let k=1,previousAngle=contact.theta;
   for(let i=0;i<=count;i++){
     const at=distal*i/count;
@@ -127,25 +162,33 @@ function makeWrapPlan(contact,shell){
     const a=Math.atan2(q.z-shell.z,q.x-shell.x);
     previousAngle+=Math.atan2(Math.sin(a-previousAngle),Math.cos(a-previousAngle));
     source.push(q);polar.push(previousAngle);
-    gaps.push(Math.hypot(q.x-shell.x,q.z-shell.z)-shellRadius(shell,q.y,a));
+    radii.push(Math.hypot(q.x-shell.x,q.z-shell.z));
   }
-  return {source,polar,gaps,rounded,target,angles};
+  return {source,polar,radii,target,angles,collar,collarArc,collarLength};
 }
 function wrapShell(contact,progress,shell){
   if(progress<=0)return contact.original;
   let plan=wrapPlans.get(contact);
   if(!plan){plan=makeWrapPlan(contact,shell);wrapPlans.set(contact,plan);}
-  const {source,polar,gaps,rounded,target,angles}=plan;
-  if(progress===1)return [...rounded,...target.slice(1)];
+  const {source,polar,radii,target,angles,collar,collarArc,collarLength}=plan;
   const p=smooth(progress);
-  const path=rounded.map((q,i)=>lerp(contact.original[i],q,p));
+  const path=contact.original.slice(0,contact.index+1);
   for(let i=1;i<source.length;i++){
-    // Proximal tissue curls first; the tip catches up continuously.
-    const u=i/(source.length-1),w=smooth(progress+progress*(1-progress)*(.65-u));
-    const theta=mix(polar[i],angles[i],w),y=mix(source[i].y,target[i].y,w);
-    const clearance=mix(gaps[i],mix(.005,.006,smooth(i/5)),w);
-    const r=shellRadius(shell,y,theta)+clearance;
+    // A shared bend fraction preserves the ordering of material along the
+    // coil. Staggering it along u made short distal tips double back midway.
+    const theta=mix(polar[i],angles[i],p),y=mix(source[i].y,target[i].y,p);
+    const r=mix(radii[i],Math.hypot(target[i].x-shell.x,target[i].z-shell.z),p);
     path.push({x:shell.x+r*Math.cos(theta),y,z:shell.z+r*Math.sin(theta)});
+  }
+  const j=contact.index,start=contact.original[j];
+  const incoming=normalized(offset(start,contact.original[j-1]));
+  const outgoing=normalized(offset(path[j+1],start));
+  const delta=offset(outgoing,incoming);
+  // Hermite displacement keeps the collar's root and contact fixed. Its
+  // contact tangent follows the CURRENT coil, including intermediate frames.
+  for(let k=collar+1;k<j;k++){
+    const u=collarArc[k-collar]/(collarLength||1);
+    path[k]=advance(contact.original[k],delta,collarLength*u*u*(u-1));
   }
   return path;
 }

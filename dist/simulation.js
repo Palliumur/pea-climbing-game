@@ -1,4 +1,4 @@
-import {smooth,lerp,distance,organShape,coiledPath,development} from './growth.js?v=depth-growth-1';
+import {smooth,lerp,distance,organShape,coiledPath,development} from './growth.js?v=wrap-smooth-1';
 import {SUPPORTS,shellGap,firstTouch} from './supports.js';
 export const CONFIG=Object.freeze({poleX:.72,poleRadius:.10,poleHeight:10.5,growthSpeed:.061,turnRate:.25,orbitPeriod:10.8,wrapDuration:8.4,minY:.22,maxY:10.0,maxX:5.2,maxAngle:65*Math.PI/180});
 export const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
@@ -153,9 +153,9 @@ export class PeaSimulation{
      const theta=Math.atan2(hit.z-support.z,hit.x-support.x);
      const previous=path[i-1],next=path[i];
      const tangential=(-(next.x-previous.x)*Math.sin(theta)+(next.z-previous.z)*Math.cos(theta))/(distance(previous,next)||1);
-     // Glancing contacts continue along the incoming tangent. For a nearly
-     // radial touch, either winding is possible; alternate by compound-leaf side.
-     const sign=Math.abs(tangential)>.55?Math.sign(tangential):-organ.side;
+     // Preserve even a small tangential component instead of reversing it
+     // during capture. A radial touch can wind either way.
+     const sign=Math.abs(tangential)>.05?Math.sign(tangential):-organ.side;
      const original=path.map(q=>({...q}));
      original.splice(i,0,hit);
      const c={...hit,supportId:support.id,theta,sign,branch:b,index:i,original,

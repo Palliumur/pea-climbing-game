@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Tendril wrapping study</title>
+  <script type="importmap">{"imports":{"three":"../../dist/vendor/three/three.module.js"}}</script>
+  <style>
+    html,body,#scene{margin:0;width:100%;height:100%;overflow:hidden;background:#000;color:#c8dfc2;font:13px monospace}
+    aside{position:absolute;bottom:20px;left:20px;display:flex;align-items:center;gap:12px;background:#101810e8;padding:14px}
+    button,select,input{font:inherit}input{width:260px}output{min-width:170px}
+  </style>
+</head>
+<body>
+  <div id="scene"></div>
+  <aside>
+    <label>Support <select id="support" aria-label="Support"></select></label>
+    <label>Wrap <input id="progress" aria-label="Wrap progress" type="range" min="0" max="1" step="0.01" value="0.5"></label>
+    <button id="play">Play</button><output id="status"></output>
+  </aside>
+  <script type="module">
+    import {PeaSimulation,CONFIG} from '../../dist/simulation.js';
+    import {PeaScene} from '../../dist/scene.js';
+    import {SUPPORTS} from '../../dist/supports.js';
+    const params=new URLSearchParams(location.search),select=document.querySelector('#support');
+    const slider=document.querySelector('#progress'),play=document.querySelector('#play'),status=document.querySelector('#status');
+    for(const shell of SUPPORTS)select.add(new Option(shell.id,shell.id));
+    select.value=params.get('support')||'S04';slider.value=params.get('progress')||'.5';
+    const sim=new PeaSimulation(),world=new PeaScene(document.querySelector('#scene'),sim);
+    let contact,playing=false,previous=0;
+    function setProgress(value){
+      contact.progress=Number(value);world.lastShapeTime=-1;
+      status.value=`${select.value} · ${(contact.progress*100).toFixed(0)}% wrapped`;
+    }
+    function choose(){
+      sim.reset();const shell=SUPPORTS.find(s=>s.id===select.value);
+      for(let frame=0;frame<5000;frame++){
+        const side=shell.x<-.88?-1:1;
+        const targetZ=shell.id==='S05'&&sim.head.x<1.14?.76:shell.z-.10;
+        sim.setDirection((shell.x-sim.head.x-side*.46)*1.8,Math.max(-.85,Math.min(.85,(targetZ-sim.head.z)*1.6)));
+        sim.step(1/30);
+        contact=sim.organs.find(o=>o.contact?.supportId===shell.id)?.contact;
+        if(contact)break;
+      }
+      if(!contact)throw Error('Missing test contact');
+      world.reset();setProgress(slider.value);
+      const root=contact.original[0],aim={x:(root.x+contact.x)/2,y:(root.y+contact.y)/2,z:(root.z+contact.z)/2};
+      world.frameCamera=()=>{
+        const side=params.get('view')==='side';
+        world.camera.position.set(aim.x+(side?2.15:.22),aim.y+.22,aim.z+(side?.22:2.15));
+        world.camera.lookAt(aim.x,aim.y,aim.z);world.camera.updateMatrixWorld();
+      };
+    }
+    select.addEventListener('change',choose);
+    slider.addEventListener('input',()=>{playing=false;play.textContent='Play';setProgress(slider.value);});
+    play.addEventListener('click',()=>{playing=!playing;play.textContent=playing?'Pause':'Play';if(playing&&contact.progress>=1){slider.value=0;setProgress(0);}});
+    choose();
+    function frame(now){
+      if(playing){
+        const progress=Math.min(1,contact.progress+(previous?Math.min((now-previous)/1000,.06):0)/CONFIG.wrapDuration);
+        slider.value=progress;setProgress(progress);
+        if(progress>=1){playing=false;play.textContent='Play';}
+      }
+      previous=now;world.render(now/1000);requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  </script>
+</body>
+</html>

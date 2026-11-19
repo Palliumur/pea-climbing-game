@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import {development,samplePath} from './growth.js?v=depth-growth-1';
+import {development,samplePath} from './growth.js?v=wrap-smooth-1';
 import {GrowingTube,unfoldBlade} from './growing-mesh.js?v=habitat-1';
 import {CapsuleField,leafRandom} from './foliage.js?v=habitat-1';
 import {inkMap,leafGeometry,leafMaterial} from './botanical.js?v=habitat-1';
@@ -78,7 +78,7 @@ export class PeaScene{
     };
     for(let pair=0;pair<(organ.leafPairs??2);pair++)for(const sign of[-1,1])blades.push(makeBlade(pair*2+(sign>0?1:0),'leaflet',pair,sign));
     for(const sign of[-1,1])stipules.push(makeBlade(4+(sign>0?1:0),'stipule',0,sign));
-    const filaments=Array.from({length:organ.tendrilCount??3},(_,i)=>{const mesh=new GrowingTube(this.tendrilMat,i?.0028:.004,72,5);const colors=[],base=new THREE.Color('#9aa995'),light=new THREE.Color('#e6eddf');
+    const filaments=Array.from({length:organ.tendrilCount??3},(_,i)=>{const mesh=new GrowingTube(this.tendrilMat,i?.0028:.004,128,5);const colors=[],base=new THREE.Color('#9aa995'),light=new THREE.Color('#e6eddf');
       for(let row=0;row<=mesh.rings;row++)for(let j=0;j<=mesh.sides;j++){
         const c=base.clone().lerp(light,.18+.45*row/mesh.rings+.32*(.5+.5*Math.cos(j/mesh.sides*2*Math.PI)));
         colors.push(c.r,c.g,c.b);

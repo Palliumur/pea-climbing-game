@@ -1,5 +1,5 @@
-import {PeaSimulation, bodyPoseFromLandmarks, torsoPitch, shoulderSpanSignal, DepthInput} from './simulation.js?v=depth-growth-1';
-import {PeaScene} from './scene.js?v=depth-growth-1';
+import {PeaSimulation, bodyPoseFromLandmarks, torsoPitch, shoulderSpanSignal, DepthInput} from './simulation.js?v=wrap-smooth-1';
+import {PeaScene} from './scene.js?v=wrap-smooth-1';
 
 const video = document.getElementById('video');
 const overlay = document.getElementById('poseOverlay');
