@@ -1,0 +1,12 @@
+{
+  "name": "pea-affordance",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A Three.js and MediaPipe pea exploration prototype",
+  "scripts": {
+    "build:pages": "python3 tools/build-github-page.py",
+    "start": "python3 -m http.server 4173 --bind 127.0.0.1 --directory dist",
+    "test": "node --test tests/*.test.js"
+  }
+}
